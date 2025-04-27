@@ -1,0 +1,70 @@
+# solvers/pinn_solver.py
+
+import torch
+import torch.nn as nn
+import numpy as np
+import os
+
+class SimplePINN(nn.Module):
+    """
+    A basic PINN architecture for learning pressure and velocity fields.
+    """
+    def __init__(self, input_dim=3, hidden_dim=64, output_dim=4):  # x, y, z → u, v, w, p
+        super(SimplePINN, self).__init__()
+        self.model = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.Tanh(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.Tanh(),
+            nn.Linear(hidden_dim, output_dim)
+        )
+
+    def forward(self, x):
+        return self.model(x)
+
+def load_pinn_model(model_path=None):
+    """
+    Loads a pretrained PINN model if provided, else returns a scaffold model with random weights.
+    """
+    model = SimplePINN()
+    if model_path and os.path.isfile(model_path):
+        print(f"[PINN] Loading pretrained model from {model_path}")
+        model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
+    else:
+        print("[PINN] No trained model provided — using random-weight scaffold.")
+    return model
+
+def predict(domain, obstacles, windows, inlet_velocity, direction, model_path=None):
+    """
+    Uses a PINN to predict the flow field.
+
+    Args:
+        domain, obstacles, windows: Simulation setup.
+        inlet_velocity, direction: Flow conditions.
+        model_path (str): Path to trained model file (.pt).
+
+    Returns:
+        velocity_field (np.ndarray): Velocity vector field.
+        pressure_field (np.ndarray): Pressure scalar field.
+    """
+    print("[PINN] Predicting with PINN surrogate...")
+
+    grid_shape = (40, 40, 40)
+    coords = torch.stack(torch.meshgrid(
+        torch.linspace(0, domain['boxes'][0]['size'][0], grid_shape[0]),
+        torch.linspace(0, domain['boxes'][0]['size'][1], grid_shape[1]),
+        torch.linspace(0, domain['boxes'][0]['size'][2], grid_shape[2]),
+        indexing='ij'
+    ), dim=-1).reshape(-1, 3)  # Flatten grid points
+
+    model = load_pinn_model(model_path)
+    model.eval()
+
+    with torch.no_grad():
+        predictions = model(coords)
+
+    predictions = predictions.numpy()
+    velocity_field = predictions[:, :3].reshape(grid_shape + (3,))
+    pressure_field = predictions[:, 3].reshape(grid_shape)
+
+    return velocity_field, pressure_field

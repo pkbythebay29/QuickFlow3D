@@ -1,0 +1,7 @@
+numpy
+scipy
+pyside6
+pyvista
+vtk
+matplotlib
+pytest
